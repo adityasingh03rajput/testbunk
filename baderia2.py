@@ -1,63 +1,68 @@
 from flask import Flask, request, jsonify
+import os
 import time
-from datetime import datetime
 
 app = Flask(__name__)
 
-devices = {}  # {ip: last_ping_time}
-attendance = {}  # {username: {"status": "present/absent", "last_active": timestamp}}
-alerts = {}  # {target_ip: message}
+# Store messages and files {recipient: [messages]}
+messages = {}
+files = {}
 
-@app.route("/ping", methods=["POST"])
-def ping():
-    ip = request.remote_addr
-    devices[ip] = time.time()
-    return {"status": "pong"}, 200
-
-@app.route("/devices", methods=["GET"])
-def get_devices():
-    now = time.time()
-    active_devices = [ip for ip, t in devices.items() if now - t < 60]
-    return jsonify(active_devices)
-
-@app.route("/update", methods=["POST"])
-def update_attendance():
+@app.route("/send_message", methods=["POST"])
+def send_message():
     data = request.json
-    username = data.get("username")
-    action = data.get("action")
-    status = data.get("status")
+    recipient = data.get("recipient")
+    message = data.get("message")
+    sender = data.get("sender")
     
-    if action == "login":
-        attendance[username] = {
-            "status": "present",
-            "last_active": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        }
-    elif action == "mark_present":
-        if username in attendance:
-            attendance[username]["status"] = "present"
-            attendance[username]["last_active"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    if recipient not in messages:
+        messages[recipient] = []
     
-    return {"status": "updated"}, 200
+    messages[recipient].append({
+        "sender": sender,
+        "message": message,
+        "timestamp": time.time()
+    })
+    
+    return {"status": "message sent"}, 200
 
-@app.route("/get_attendance", methods=["GET"])
-def get_attendance():
-    return jsonify(attendance)
+@app.route("/send_file", methods=["POST"])
+def send_file():
+    if 'file' not in request.files:
+        return {"error": "No file part"}, 400
+    
+    file = request.files['file']
+    recipient = request.form.get("recipient")
+    sender = request.form.get("sender")
+    
+    if recipient not in files:
+        files[recipient] = []
+    
+    filename = f"{int(time.time())}_{file.filename}"
+    file.save(filename)
+    
+    files[recipient].append({
+        "sender": sender,
+        "filename": filename,
+        "original_name": file.filename,
+        "timestamp": time.time()
+    })
+    
+    return {"status": "file received"}, 200
 
-@app.route("/send_alert", methods=["POST"])
-def send_alert():
-    data = request.json
-    target_ip = data.get("target_ip")
-    message = data.get("message", "ALERT!")
-    if target_ip:
-        alerts[target_ip] = message
-        return {"status": "alert queued"}, 200
-    return {"error": "Missing target_ip"}, 400
+@app.route("/get_messages", methods=["GET"])
+def get_messages():
+    recipient = request.args.get("recipient")
+    user_messages = messages.get(recipient, [])
+    messages[recipient] = []  # Clear after reading
+    return jsonify({"messages": user_messages})
 
-@app.route("/get_alert", methods=["GET"])
-def get_alert():
-    ip = request.remote_addr
-    alert = alerts.pop(ip, None)
-    return jsonify({"alert": alert}) if alert else jsonify({})
+@app.route("/get_files", methods=["GET"])
+def get_files():
+    recipient = request.args.get("recipient")
+    user_files = files.get(recipient, [])
+    files[recipient] = []  # Clear after reading
+    return jsonify({"files": user_files})
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=20074)
