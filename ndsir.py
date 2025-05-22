@@ -11,7 +11,7 @@ class LetsBunkClient:
         self.root.title("LetsBunk Client")
         self.root.geometry("400x300")
         
-        self.server_ip = "192.168.115.49"  # Change to your server IP
+        self.server_ip = "192.168.205.122"  # Change to your server IP
         self.server_port = 65432
         self.client_socket = None
         self.username = None
