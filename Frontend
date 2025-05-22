@@ -29,7 +29,7 @@ class WebApp(QMainWindow):
             <style>
                 body {
                     font-family: 'Poppins', sans-serif;
-                    background-color: #0a192f; /* Navy blue */
+                    background-color: #0a192f;
                     margin: 0;
                     padding: 0;
                     display: flex;
@@ -37,19 +37,23 @@ class WebApp(QMainWindow):
                     align-items: center;
                     min-height: 100vh;
                     color: #ccd6f6;
+                    overflow: hidden;
                 }
                 
                 .container {
                     text-align: center;
                     width: 80%;
                     max-width: 800px;
+                    margin-top: -60px;
                 }
                 
                 h1 {
-                    color: #64ffda; /* Teal */
-                    margin-bottom: 50px;
-                    font-size: 2.2rem;
-                    letter-spacing: 1px;
+                    color: #64ffda;
+                    margin-bottom: 70px;
+                    font-size: 3.2rem;
+                    letter-spacing: 1.5px;
+                    text-shadow: 0 2px 8px rgba(100, 255, 218, 0.3);
+                    font-weight: 700;
                 }
                 
                 .options-container {
@@ -60,7 +64,7 @@ class WebApp(QMainWindow):
                 }
                 
                 .option-box {
-                    background-color: #112240; /* Dark blue */
+                    background-color: #112240;
                     border-radius: 15px;
                     box-shadow: 0 8px 20px rgba(0, 0, 0, 0.2);
                     padding: 30px;
@@ -72,6 +76,9 @@ class WebApp(QMainWindow):
                     align-items: center;
                     height: 180px;
                     border: 1px solid #1f2a4a;
+                    transform-style: preserve-3d;
+                    position: relative;
+                    z-index: 1;
                 }
                 
                 .option-box:hover {
@@ -84,19 +91,91 @@ class WebApp(QMainWindow):
                     margin: 0;
                     font-size: 2.2rem;
                     font-weight: 600;
-                    color: #e6f1ff; /* Light blue */
+                    color: #e6f1ff;
                     letter-spacing: 0.5px;
                 }
                 
                 #teacher-box:hover h2 {
-                    color: #ff7b7b; /* Coral */
+                    color: #64ffda;
                 }
                 
                 #student-box:hover h2 {
-                    color: #64ffda; /* Teal */
+                    color: #64ffda;
+                }
+                
+                @keyframes singleSpinZoom {
+                    0% {
+                        transform: scale(1) rotateY(0);
+                        border-radius: 15px;
+                    }
+                    30% {
+                        transform: scale(1.5) rotateY(180deg);
+                        border-radius: 8px;
+                    }
+                    100% {
+                        transform: scale(10) rotateY(360deg);
+                        border-radius: 0;
+                        width: 100vw;
+                        height: 100vh;
+                        position: fixed;
+                        top: 0;
+                        left: 0;
+                        margin: 0;
+                    }
+                }
+                
+                .spin-zoom-animation {
+                    animation: singleSpinZoom 1.2s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+                    z-index: 1000 !important;
+                }
+                
+                /* New page styles */
+                .new-page {
+                    display: none;
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 100%;
+                    background-color: #112240;
+                    z-index: 900;
+                    flex-direction: column;
+                    justify-content: center;
+                    align-items: center;
+                    color: #64ffda;
+                }
+                
+                .new-page h1 {
+                    font-size: 3rem;
+                    margin-bottom: 30px;
+                }
+                
+                .new-page p {
+                    font-size: 1.5rem;
+                    color: #e6f1ff;
+                    max-width: 600px;
+                    text-align: center;
+                    line-height: 1.6;
+                }
+                
+                .back-button {
+                    margin-top: 40px;
+                    padding: 12px 30px;
+                    background-color: #64ffda;
+                    color: #0a192f;
+                    border: none;
+                    border-radius: 5px;
+                    font-size: 1.2rem;
+                    cursor: pointer;
+                    transition: all 0.3s ease;
+                }
+                
+                .back-button:hover {
+                    background-color: #52e8d1;
+                    transform: translateY(-3px);
                 }
             </style>
-            <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
+            <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap" rel="stylesheet">
         </head>
         <body>
             <div class="container">
@@ -111,24 +190,68 @@ class WebApp(QMainWindow):
                 </div>
             </div>
             
+            <!-- New page content -->
+            <div class="new-page" id="teacher-page">
+                <h1>Teacher Portal</h1>
+                <p>Welcome to the teacher dashboard. Here you can manage your classes, assignments, and student progress.</p>
+                <button class="back-button" onclick="goBack()">Back to Home</button>
+            </div>
+            
+            <div class="new-page" id="student-page">
+                <h1>Student Portal</h1>
+                <p>Welcome to your student dashboard. Access your courses, assignments, and learning materials here.</p>
+                <button class="back-button" onclick="goBack()">Back to Home</button>
+            </div>
+            
             <script>
                 function selectOption(option) {
                     const box = document.getElementById(`${option}-box`);
-                    box.style.transform = "scale(0.95)";
+                    const newPage = document.getElementById(`${option}-page`);
+                    
+                    // Apply the animation
+                    box.classList.add('spin-zoom-animation');
+                    box.style.pointerEvents = 'none';
+                    
+                    // After animation completes
                     setTimeout(() => {
-                        box.style.transform = "";
-                        alert(`${option.charAt(0).toUpperCase() + option.slice(1)} option selected!`);
-                    }, 200);
+                        // Hide main container
+                        document.querySelector('.container').style.display = 'none';
+                        
+                        // Show the new page
+                        newPage.style.display = 'flex';
+                        
+                        // Reset the animated box (but keep it hidden)
+                        box.classList.remove('spin-zoom-animation');
+                        box.style.display = 'none';
+                    }, 1200);
+                }
+                
+                function goBack() {
+                    // Hide all new pages
+                    document.querySelectorAll('.new-page').forEach(page => {
+                        page.style.display = 'none';
+                    });
+                    
+                    // Show main container and boxes again
+                    document.querySelector('.container').style.display = 'block';
+                    document.querySelectorAll('.option-box').forEach(box => {
+                        box.style.display = 'flex';
+                        box.style.pointerEvents = 'auto';
+                    });
                 }
                 
                 // Hover effects
                 document.querySelectorAll('.option-box').forEach(box => {
                     box.addEventListener('mouseenter', function() {
-                        this.style.boxShadow = '0 12px 25px rgba(100, 255, 218, 0.3)';
+                        if (!this.classList.contains('spin-zoom-animation')) {
+                            this.style.boxShadow = '0 12px 25px rgba(100, 255, 218, 0.3)';
+                        }
                     });
                     
                     box.addEventListener('mouseleave', function() {
-                        this.style.boxShadow = '0 8px 20px rgba(0, 0, 0, 0.2)';
+                        if (!this.classList.contains('spin-zoom-animation')) {
+                            this.style.boxShadow = '0 8px 20px rgba(0, 0, 0, 0.2)';
+                        }
                     });
                 });
             </script>
