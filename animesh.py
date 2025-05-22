@@ -1,177 +1,378 @@
-import tkinter as tk
-from tkinter import messagebox
 import json
-import os
-import ctypes
-import subprocess
-import requests
+import logging
+import time
+import threading
+from websocket import WebSocketApp, WebSocketConnectionClosedException
+import tkinter as tk
+from tkinter import messagebox, ttk
 from datetime import datetime
+import subprocess
+import platform
+import sys
 
-# File to store user data
-USER_FILE = "users.json"
-SERVER_URL = "http://localhost:20074"  # Flask server URL
+# Configuration
+SERVER_WS_URL = "ws://your-server-public-ip:5000/ws"  # Replace with your server's public IP/domain
+HEARTBEAT_INTERVAL = 25  # seconds
+RECONNECT_DELAY = 5  # seconds
+WIFI_CHECK_INTERVAL = 10  # seconds
 
-# Load existing users from the file
-def load_users():
-    if os.path.exists(USER_FILE):
-        with open(USER_FILE, "r") as file:
-            return json.load(file)
-    return {}
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('student_client.log'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
 
-# Save users to the file
-def save_users(users):
-    with open(USER_FILE, "w") as file:
-        json.dump(users, file, indent=4)
+class StudentClient:
+    def __init__(self):
+        self.ws = None
+        self.connected = False
+        self.username = None
+        self.password = None
+        self.role = None
+        self.stop_event = threading.Event()
+        self.wifi_thread = None
+        self.heartbeat_thread = None
+        self.reconnect_thread = None
+        self.last_wifi_state = None
+        
+        # Setup GUI
+        self.root = tk.Tk()
+        self.root.title("Student Attendance System")
+        self.setup_login_gui()
+        
+        # Start connection manager
+        self.connection_manager_thread = threading.Thread(target=self.connection_manager, daemon=True)
+        self.connection_manager_thread.start()
+        
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+        self.root.mainloop()
 
-# Function to send data to server
-def send_data(action, username=None, status=None):
-    try:
-        data = {"action": action, "username": username, "status": status}
-        response = requests.post(f"{SERVER_URL}/update", json=data)
-        return response.json()
-    except requests.RequestException as e:
-        messagebox.showerror("Connection Error", f"Failed to send data: {e}")
-        return None
+    def setup_login_gui(self):
+        self.root.geometry("350x250")
+        
+        # Main frame
+        self.main_frame = tk.Frame(self.root)
+        self.main_frame.pack(pady=20)
+        
+        # Title
+        tk.Label(self.main_frame, text="Student Portal", font=("Arial", 16)).grid(row=0, column=0, columnspan=2, pady=10)
+        
+        # Username
+        tk.Label(self.main_frame, text="Username:").grid(row=1, column=0, sticky="e", padx=5, pady=5)
+        self.entry_username = tk.Entry(self.main_frame)
+        self.entry_username.grid(row=1, column=1, padx=5, pady=5)
+        
+        # Password
+        tk.Label(self.main_frame, text="Password:").grid(row=2, column=0, sticky="e", padx=5, pady=5)
+        self.entry_password = tk.Entry(self.main_frame, show="*")
+        self.entry_password.grid(row=2, column=1, padx=5, pady=5)
+        
+        # Buttons
+        self.btn_frame = tk.Frame(self.main_frame)
+        self.btn_frame.grid(row=3, column=0, columnspan=2, pady=10)
+        
+        tk.Button(self.btn_frame, text="Login", command=self.login).pack(side="left", padx=5)
+        tk.Button(self.btn_frame, text="Sign Up", command=self.signup).pack(side="left", padx=5)
+        
+        # Status label
+        self.status_label = tk.Label(self.root, text="Not connected", fg="red")
+        self.status_label.pack(pady=5)
 
-# Signup function
-def signup():
-    username = entry_username.get()
-    password = entry_password.get()
+    def setup_attendance_gui(self):
+        # Clear the window
+        for widget in self.root.winfo_children():
+            widget.destroy()
+        
+        self.root.geometry("400x350")
+        
+        # Title
+        tk.Label(self.root, text="Attendance System", font=("Arial", 16)).pack(pady=10)
+        
+        # Connection status
+        self.connection_status = tk.Label(self.root, text="", font=("Arial", 10))
+        self.connection_status.pack(pady=5)
+        
+        # Wifi status
+        self.wifi_status = tk.Label(self.root, text="", font=("Arial", 10))
+        self.wifi_status.pack(pady=5)
+        
+        # Attendance status
+        self.attendance_status = tk.Label(self.root, text="Status: Not marked", font=("Arial", 12))
+        self.attendance_status.pack(pady=10)
+        
+        # Last seen
+        self.last_seen_label = tk.Label(self.root, text="Last seen: Never", font=("Arial", 10))
+        self.last_seen_label.pack(pady=5)
+        
+        # Mark attendance button
+        self.mark_btn = tk.Button(self.root, text="Mark Attendance", 
+                                command=self.mark_attendance,
+                                state=tk.NORMAL)
+        self.mark_btn.pack(pady=20)
+        
+        # Messages frame
+        self.messages_frame = tk.Frame(self.root)
+        self.messages_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        tk.Label(self.messages_frame, text="Messages:").pack(anchor="w")
+        self.messages_text = tk.Text(self.messages_frame, height=4, state=tk.DISABLED)
+        self.messages_text.pack(fill=tk.BOTH, expand=True)
+        
+        # Start updating status
+        self.update_ui_status()
 
-    if not username or not password:
-        messagebox.showwarning("Input Error", "Please fill in all fields.")
-        return
-
-    users = load_users()
-    if username in users:
-        messagebox.showwarning("Signup Error", "Username already exists.")
-        return
-
-    users[username] = password
-    save_users(users)
-    messagebox.showinfo("Signup Success", "Signup successful!")
-    clear_entries()
-
-# Login function
-def login():
-    username = entry_username.get()
-    password = entry_password.get()
-
-    if not username or not password:
-        messagebox.showwarning("Input Error", "Please fill in all fields.")
-        return
-
-    users = load_users()
-    if username in users and users[username] == password:
-        messagebox.showinfo("Login Success", "Login successful!")
-        clear_entries()
-        root.destroy()  # Close the login window
-        send_data("login", username, "student")
-        start_attendance_timer(username)
-    else:
-        messagebox.showerror("Login Failed", "Invalid username or password.")
-        clear_entries()
-
-# Clear input fields
-def clear_entries():
-    entry_username.delete(0, tk.END)
-    entry_password.delete(0, tk.END)
-
-# Hide the console window (Windows only)
-if os.name == 'nt':
-    ctypes.windll.user32.ShowWindow(ctypes.windll.kernel32.GetConsoleWindow(), 0)
-
-# Global timer variables
-timer = 10  # 10 seconds for demo
-timer_started = False
-
-# Function to update the timer
-def update_timer(username):
-    global timer, timer_started
-    if timer_started:
-        if timer > 0:
-            timer_label.config(text=f"Time remaining: {timer} seconds")
-            timer -= 1
-            root_attend.after(1000, update_timer, username)
+    def update_ui_status(self):
+        # Update connection status
+        if self.connected:
+            self.connection_status.config(text="Connected to server", fg="green")
         else:
-            timer_label.config(text="Time's up! Attendance Marked.", fg="green")
-            messagebox.showinfo("Attendance", "You are now marked as present.")
-            timer_started = False
-            start_button.config(state=tk.NORMAL)
-            send_data("mark_present", username, "present")
+            self.connection_status.config(text="Disconnected from server", fg="red")
+        
+        # Update wifi status
+        wifi_connected = self.check_wifi_connection()
+        if wifi_connected:
+            self.wifi_status.config(text="On campus network", fg="green")
+        else:
+            self.wifi_status.config(text="Off campus network", fg="red")
+        
+        self.root.after(1000, self.update_ui_status)
 
-# Function to start the timer
-def start_timer(username):
-    global timer, timer_started
-    timer = 10  # Reset the timer
-    timer_started = True
-    start_button.config(state=tk.DISABLED)
-    send_data("start_timer", username, "present")
-    update_timer(username)
+    def check_wifi_connection(self):
+        """Check if connected to authorized WiFi (platform specific)"""
+        try:
+            if platform.system() == "Windows":
+                result = subprocess.run(["netsh", "wlan", "show", "interfaces"], 
+                                      capture_output=True, text=True)
+                return "Your-SSID" in result.stdout  # Replace with your SSID
+            elif platform.system() == "Linux":
+                result = subprocess.run(["iwgetid", "-r"], capture_output=True, text=True)
+                return "Your-SSID" in result.stdout.strip()
+            elif platform.system() == "Darwin":
+                result = subprocess.run(["/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport", "-I"], 
+                                      capture_output=True, text=True)
+                return "Your-SSID" in result.stdout
+            return False
+        except Exception:
+            return False
 
-# Function to start the attendance timer system
-def start_attendance_timer(username):
-    global root_attend, timer_label, start_button
+    def on_ws_open(self, ws):
+        logger.info("WebSocket connection opened")
+        self.connected = True
+        self.status_label.config(text="Connected", fg="green")
+        
+        # Authenticate
+        auth_msg = {
+            "type": "auth",
+            "username": self.username,
+            "password": self.password
+        }
+        self.ws.send(json.dumps(auth_msg))
+        
+        # Start heartbeat
+        self.start_heartbeat()
 
-    root_attend = tk.Tk()
-    root_attend.title("Attendance Timer")
-    root_attend.geometry("400x250")
-    root_attend.resizable(False, False)
+    def on_ws_close(self, ws, close_status_code, close_msg):
+        logger.info(f"WebSocket connection closed: {close_status_code} - {close_msg}")
+        self.connected = False
+        self.status_label.config(text="Disconnected", fg="red")
+        
+        # Stop heartbeat
+        if self.heartbeat_thread and self.heartbeat_thread.is_alive():
+            self.heartbeat_thread.join(timeout=1)
+        
+        # Try to reconnect
+        if not self.stop_event.is_set():
+            self.schedule_reconnect()
 
-    title_label = tk.Label(root_attend, text="Attendance Timer 🕒", font=("Arial", 18, "bold"))
-    title_label.pack(pady=10)
+    def on_ws_message(self, ws, message):
+        try:
+            data = json.loads(message)
+            logger.debug(f"Received message: {data}")
+            
+            if data.get("type") == "auth_ack":
+                if data.get("status") == "success":
+                    self.role = "student"
+                    self.setup_attendance_gui()
+                else:
+                    messagebox.showerror("Error", "Authentication failed")
+            
+            elif data.get("type") == "notification":
+                self.show_message(data.get("from", "Teacher"), data.get("message", ""))
+            
+        except json.JSONDecodeError:
+            logger.error("Invalid JSON message received")
 
-    instructions_label = tk.Label(
-        root_attend,
-        text="Click 'Start Timer' to begin your attendance session.",
-        wraplength=350,
-        font=("Arial", 10)
-    )
-    instructions_label.pack(pady=10)
+    def on_ws_error(self, ws, error):
+        logger.error(f"WebSocket error: {error}")
+        self.connected = False
+        self.status_label.config(text="Connection error", fg="red")
 
-    timer_label = tk.Label(root_attend, text="", font=("Arial", 14))
-    timer_label.pack(pady=20)
+    def connection_manager(self):
+        while not self.stop_event.is_set():
+            if self.username and not self.connected and not self.reconnect_thread:
+                self.schedule_reconnect()
+            time.sleep(1)
 
-    start_button = tk.Button(
-        root_attend,
-        text="Start Timer",
-        command=lambda: start_timer(username),
-        font=("Arial", 12),
-        bg="#4CAF50",
-        fg="white",
-        padx=20,
-        pady=10
-    )
-    start_button.pack(pady=10)
+    def schedule_reconnect(self):
+        if not self.reconnect_thread or not self.reconnect_thread.is_alive():
+            self.reconnect_thread = threading.Thread(target=self.reconnect, daemon=True)
+            self.reconnect_thread.start()
 
-    # Register with the server
-    requests.post(f"{SERVER_URL}/ping")
-    
-    root_attend.mainloop()
+    def reconnect(self):
+        while not self.connected and not self.stop_event.is_set():
+            logger.info("Attempting to reconnect...")
+            try:
+                self.connect_websocket()
+                # Wait for connection to establish or fail
+                time.sleep(2)
+                if not self.connected:
+                    time.sleep(RECONNECT_DELAY)
+            except Exception as e:
+                logger.error(f"Reconnect attempt failed: {e}")
+                time.sleep(RECONNECT_DELAY)
 
-# Create the main login window
-root = tk.Tk()
-root.title("Signup and Login System")
-root.geometry("300x200")
+    def connect_websocket(self):
+        try:
+            self.ws = WebSocketApp(
+                SERVER_WS_URL,
+                on_open=self.on_ws_open,
+                on_message=self.on_ws_message,
+                on_error=self.on_ws_error,
+                on_close=self.on_ws_close
+            )
+            
+            # Start WebSocket in a separate thread
+            self.ws_thread = threading.Thread(target=self.ws.run_forever, daemon=True)
+            self.ws_thread.start()
+            
+        except Exception as e:
+            logger.error(f"Error connecting WebSocket: {e}")
+            self.connected = False
 
-# Username Label and Entry
-label_username = tk.Label(root, text="Username:")
-label_username.pack(pady=5)
-entry_username = tk.Entry(root)
-entry_username.pack(pady=5)
+    def start_heartbeat(self):
+        if self.heartbeat_thread and self.heartbeat_thread.is_alive():
+            return
+            
+        self.heartbeat_thread = threading.Thread(target=self.send_heartbeat, daemon=True)
+        self.heartbeat_thread.start()
 
-# Password Label and Entry
-label_password = tk.Label(root, text="Password:")
-label_password.pack(pady=5)
-entry_password = tk.Entry(root, show="*")
-entry_password.pack(pady=5)
+    def send_heartbeat(self):
+        while self.connected and not self.stop_event.is_set():
+            try:
+                if self.ws and self.connected:
+                    heartbeat = {
+                        "type": "heartbeat",
+                        "timestamp": datetime.now().isoformat()
+                    }
+                    self.ws.send(json.dumps(heartbeat))
+                    logger.debug("Sent heartbeat")
+            except WebSocketConnectionClosedException:
+                self.connected = False
+                logger.warning("Connection closed during heartbeat")
+                break
+            except Exception as e:
+                logger.error(f"Heartbeat error: {e}")
+                self.connected = False
+                break
+                
+            time.sleep(HEARTBEAT_INTERVAL)
 
-# Signup Button
-button_signup = tk.Button(root, text="Signup", command=signup)
-button_signup.pack(pady=10)
+    def monitor_wifi(self):
+        while not self.stop_event.is_set():
+            current_state = self.check_wifi_connection()
+            
+            if self.last_wifi_state is not None and current_state != self.last_wifi_state:
+                if self.connected and self.username:
+                    status_msg = {
+                        "type": "status_update",
+                        "status": "present" if current_state else "absent"
+                    }
+                    try:
+                        self.ws.send(json.dumps(status_msg))
+                    except:
+                        pass
+                        
+            self.last_wifi_state = current_state
+            time.sleep(WIFI_CHECK_INTERVAL)
 
-# Login Button
-button_login = tk.Button(root, text="Login", command=login)
-button_login.pack(pady=10)
+    def login(self):
+        self.username = self.entry_username.get()
+        self.password = self.entry_password.get()
+        
+        if not self.username or not self.password:
+            messagebox.showwarning("Error", "Please enter both username and password")
+            return
+        
+        # Connect WebSocket if not already connected
+        if not self.connected:
+            self.connect_websocket()
+            time.sleep(1)  # Small delay for connection to establish
+            
+        # Start WiFi monitoring
+        if not self.wifi_thread or not self.wifi_thread.is_alive():
+            self.wifi_thread = threading.Thread(target=self.monitor_wifi, daemon=True)
+            self.wifi_thread.start()
 
-root.mainloop()
+    def signup(self):
+        username = self.entry_username.get()
+        password = self.entry_password.get()
+        
+        if not username or not password:
+            messagebox.showwarning("Error", "Please enter both username and password")
+            return
+        
+        # In a real app, this would send to server
+        messagebox.showinfo("Info", "Please contact administrator to create an account")
+        # Alternatively implement API registration if available
+
+    def mark_attendance(self):
+        if not self.connected:
+            messagebox.showwarning("Error", "Not connected to server")
+            return
+            
+        if not self.check_wifi_connection():
+            messagebox.showwarning("Error", "You must be on campus network to mark attendance")
+            return
+            
+        try:
+            status_msg = {
+                "type": "status_update",
+                "status": "present"
+            }
+            self.ws.send(json.dumps(status_msg))
+            self.attendance_status.config(text="Status: Present", fg="green")
+            self.last_seen_label.config(text=f"Last seen: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            messagebox.showinfo("Success", "Attendance marked successfully")
+        except:
+            messagebox.showerror("Error", "Failed to mark attendance")
+
+    def show_message(self, sender, message):
+        self.messages_text.config(state=tk.NORMAL)
+        self.messages_text.insert(tk.END, f"{sender}: {message}\n")
+        self.messages_text.config(state=tk.DISABLED)
+        self.messages_text.see(tk.END)
+
+    def on_closing(self):
+        self.stop_event.set()
+        
+        # Close WebSocket
+        if self.ws:
+            self.ws.close()
+        
+        # Wait for threads to finish
+        if self.heartbeat_thread and self.heartbeat_thread.is_alive():
+            self.heartbeat_thread.join(timeout=1)
+        
+        if self.wifi_thread and self.wifi_thread.is_alive():
+            self.wifi_thread.join(timeout=1)
+        
+        self.root.destroy()
+        sys.exit(0)
+
+if __name__ == "__main__":
+    StudentClient()
