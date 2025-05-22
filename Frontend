@@ -1,0 +1,146 @@
+import sys
+from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget
+from PyQt5.QtWebEngineWidgets import QWebEngineView
+from PyQt5.QtCore import QUrl, QSize
+
+class WebApp(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Let's Bunk")
+        self.setMinimumSize(QSize(800, 600))
+        
+        # Create central widget
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        
+        # Create layout
+        layout = QVBoxLayout()
+        central_widget.setLayout(layout)
+        
+        # Create web view
+        self.web_view = QWebEngineView()
+        layout.addWidget(self.web_view)
+        
+        # Load HTML with embedded CSS and JavaScript
+        html_content = """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <style>
+                body {
+                    font-family: 'Poppins', sans-serif;
+                    background-color: #0a192f; /* Navy blue */
+                    margin: 0;
+                    padding: 0;
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                    min-height: 100vh;
+                    color: #ccd6f6;
+                }
+                
+                .container {
+                    text-align: center;
+                    width: 80%;
+                    max-width: 800px;
+                }
+                
+                h1 {
+                    color: #64ffda; /* Teal */
+                    margin-bottom: 50px;
+                    font-size: 2.2rem;
+                    letter-spacing: 1px;
+                }
+                
+                .options-container {
+                    display: flex;
+                    justify-content: space-around;
+                    flex-wrap: wrap;
+                    gap: 30px;
+                }
+                
+                .option-box {
+                    background-color: #112240; /* Dark blue */
+                    border-radius: 15px;
+                    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.2);
+                    padding: 30px;
+                    width: 250px;
+                    transition: all 0.3s ease;
+                    cursor: pointer;
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                    height: 180px;
+                    border: 1px solid #1f2a4a;
+                }
+                
+                .option-box:hover {
+                    transform: translateY(-8px);
+                    box-shadow: 0 12px 25px rgba(100, 255, 218, 0.2);
+                    border-color: #64ffda;
+                }
+                
+                .option-box h2 {
+                    margin: 0;
+                    font-size: 2.2rem;
+                    font-weight: 600;
+                    color: #e6f1ff; /* Light blue */
+                    letter-spacing: 0.5px;
+                }
+                
+                #teacher-box:hover h2 {
+                    color: #ff7b7b; /* Coral */
+                }
+                
+                #student-box:hover h2 {
+                    color: #64ffda; /* Teal */
+                }
+            </style>
+            <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
+        </head>
+        <body>
+            <div class="container">
+                <h1>Let's Bunk</h1>
+                <div class="options-container">
+                    <div class="option-box" id="teacher-box" onclick="selectOption('teacher')">
+                        <h2>Teacher</h2>
+                    </div>
+                    <div class="option-box" id="student-box" onclick="selectOption('student')">
+                        <h2>Student</h2>
+                    </div>
+                </div>
+            </div>
+            
+            <script>
+                function selectOption(option) {
+                    const box = document.getElementById(`${option}-box`);
+                    box.style.transform = "scale(0.95)";
+                    setTimeout(() => {
+                        box.style.transform = "";
+                        alert(`${option.charAt(0).toUpperCase() + option.slice(1)} option selected!`);
+                    }, 200);
+                }
+                
+                // Hover effects
+                document.querySelectorAll('.option-box').forEach(box => {
+                    box.addEventListener('mouseenter', function() {
+                        this.style.boxShadow = '0 12px 25px rgba(100, 255, 218, 0.3)';
+                    });
+                    
+                    box.addEventListener('mouseleave', function() {
+                        this.style.boxShadow = '0 8px 20px rgba(0, 0, 0, 0.2)';
+                    });
+                });
+            </script>
+        </body>
+        </html>
+        """
+        
+        # Load HTML content
+        self.web_view.setHtml(html_content)
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    window = WebApp()
+    window.show()
+    sys.exit(app.exec_())
