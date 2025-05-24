@@ -3,20 +3,15 @@ from tkinter import messagebox
 import json
 import os
 import ctypes
-import socket
 import threading
-from datetime import datetime
 import requests
 import platform
-
-# File to store user data
-USER_FILE = "users.json"
+import subprocess
 
 # Server configuration
-SERVER_URL = "https://deadball.onrender.com"  # Change to your server URL
-
-# Connection settings
+SERVER_URL = "https://deadball.onrender.com"
 PING_INTERVAL = 30
+USER_FILE = "users.json"
 
 class AttendanceSystem:
     def __init__(self):
@@ -27,8 +22,11 @@ class AttendanceSystem:
 
     def load_users(self):
         if os.path.exists(USER_FILE):
-            with open(USER_FILE, "r") as file:
-                return json.load(file)
+            try:
+                with open(USER_FILE, "r") as file:
+                    return json.load(file)
+            except:
+                return {}
         return {}
 
     def save_users(self):
@@ -61,28 +59,26 @@ class AttendanceSystem:
                     json={"type": "students", "username": username},
                     timeout=5
                 )
-        except requests.RequestException as e:
-            print(f"Connection error: {e}")
+        except requests.RequestException:
+            pass
 
     def setup_wifi_checker(self):
-        """Setup WiFi checker based on OS"""
         self.os_type = platform.system()
         if self.os_type == "Windows":
             self.check_wifi = self._check_wifi_windows
         elif self.os_type == "Linux":
             self.check_wifi = self._check_wifi_linux
         else:
-            self.check_wifi = lambda: True  # Default to True for unsupported OS
+            self.check_wifi = lambda: True
 
     def _check_wifi_windows(self):
         try:
-            import subprocess
             result = subprocess.run(
                 ["netsh", "wlan", "show", "interfaces"],
-                capture_output=True, text=True
+                capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW
             )
             for line in result.stdout.splitlines():
-                if "SSID" in line and not "BSSID" in line:
+                if "SSID" in line and "BSSID" not in line:
                     self.current_wifi = line.split(":")[1].strip()
                     return True
             return False
@@ -91,7 +87,6 @@ class AttendanceSystem:
 
     def _check_wifi_linux(self):
         try:
-            import subprocess
             result = subprocess.run(
                 ["iwgetid", "-r"],
                 capture_output=True, text=True
@@ -107,21 +102,89 @@ class StudentClient:
         self.root = tk.Tk()
         self.setup_login_ui()
         self.start_ping_thread()
+        self.hide_console()
         self.root.mainloop()
 
+    def hide_console(self):
+        if os.name == 'nt':
+            ctypes.windll.user32.ShowWindow(ctypes.windll.kernel32.GetConsoleWindow(), 0)
+
     def setup_login_ui(self):
-        self.root.title("Student Login")
-        self.root.geometry("300x200")
+        self.root.title("Student Portal")
+        self.root.geometry("350x300")
+        self.root.resizable(False, False)
         
-        tk.Label(self.root, text="Username:").pack(pady=5)
-        self.entry_username = tk.Entry(self.root)
-        self.entry_username.pack(pady=5)
+        # Main frame
+        main_frame = tk.Frame(self.root, padx=20, pady=20)
+        main_frame.pack(expand=True)
         
-        tk.Label(self.root, text="Password:").pack(pady=5)
-        self.entry_password = tk.Entry(self.root, show="*")
-        self.entry_password.pack(pady=5)
+        # Title
+        tk.Label(main_frame, text="Student Portal", font=("Arial", 16, "bold")).grid(row=0, column=0, columnspan=2, pady=10)
         
-        tk.Button(self.root, text="Login", command=self.login).pack(pady=10)
+        # Username
+        tk.Label(main_frame, text="Username:").grid(row=1, column=0, sticky="e", pady=5)
+        self.entry_username = tk.Entry(main_frame)
+        self.entry_username.grid(row=1, column=1, pady=5, ipadx=20)
+        
+        # Password
+        tk.Label(main_frame, text="Password:").grid(row=2, column=0, sticky="e", pady=5)
+        self.entry_password = tk.Entry(main_frame, show="*")
+        self.entry_password.grid(row=2, column=1, pady=5, ipadx=20)
+        
+        # Buttons
+        btn_frame = tk.Frame(main_frame)
+        btn_frame.grid(row=3, column=0, columnspan=2, pady=15)
+        
+        tk.Button(btn_frame, text="Login", command=self.login, width=10, bg="#4CAF50", fg="white").pack(side="left", padx=5)
+        tk.Button(btn_frame, text="Sign Up", command=self.show_signup, width=10, bg="#2196F3", fg="white").pack(side="left", padx=5)
+
+    def show_signup(self):
+        self.signup_window = tk.Toplevel(self.root)
+        self.signup_window.title("Sign Up")
+        self.signup_window.geometry("350x300")
+        self.signup_window.resizable(False, False)
+        
+        # Main frame
+        main_frame = tk.Frame(self.signup_window, padx=20, pady=20)
+        main_frame.pack(expand=True)
+        
+        tk.Label(main_frame, text="Create New Account", font=("Arial", 14, "bold")).grid(row=0, column=0, columnspan=2, pady=10)
+        
+        tk.Label(main_frame, text="Username:").grid(row=1, column=0, sticky="e", pady=5)
+        self.signup_username = tk.Entry(main_frame)
+        self.signup_username.grid(row=1, column=1, pady=5, ipadx=20)
+        
+        tk.Label(main_frame, text="Password:").grid(row=2, column=0, sticky="e", pady=5)
+        self.signup_password = tk.Entry(main_frame, show="*")
+        self.signup_password.grid(row=2, column=1, pady=5, ipadx=20)
+        
+        tk.Label(main_frame, text="Confirm Password:").grid(row=3, column=0, sticky="e", pady=5)
+        self.signup_confirm_password = tk.Entry(main_frame, show="*")
+        self.signup_confirm_password.grid(row=3, column=1, pady=5, ipadx=20)
+        
+        tk.Button(main_frame, text="Register", command=self.signup, bg="#4CAF50", fg="white", width=15).grid(row=4, column=0, columnspan=2, pady=15)
+
+    def signup(self):
+        username = self.signup_username.get()
+        password = self.signup_password.get()
+        confirm_password = self.signup_confirm_password.get()
+        
+        if not username or not password or not confirm_password:
+            messagebox.showwarning("Error", "Please fill all fields")
+            return
+            
+        if password != confirm_password:
+            messagebox.showerror("Error", "Passwords don't match")
+            return
+            
+        if username in self.system.users:
+            messagebox.showerror("Error", "Username already exists")
+            return
+            
+        self.system.users[username] = password
+        self.system.save_users()
+        messagebox.showinfo("Success", "Account created successfully!")
+        self.signup_window.destroy()
 
     def login(self):
         username = self.entry_username.get()
@@ -132,13 +195,13 @@ class StudentClient:
             return
             
         if username in self.system.users and self.system.users[username] == password:
-            messagebox.showinfo("Login Success", "Login successful!")
+            messagebox.showinfo("Success", "Login successful!")
             self.system.username = username
             self.root.destroy()
             self.system.send_data("login", username)
             self.start_attendance_timer()
         else:
-            messagebox.showerror("Login Failed", "Invalid username or password.")
+            messagebox.showerror("Error", "Invalid username or password")
 
     def start_ping_thread(self):
         def ping():
@@ -151,39 +214,49 @@ class StudentClient:
 
     def start_attendance_timer(self):
         self.attendance_window = tk.Tk()
-        self.attendance_window.title("Attendance Timer")
-        self.attendance_window.geometry("400x300")
+        self.attendance_window.title("Attendance System")
+        self.attendance_window.geometry("500x400")
+        self.attendance_window.resizable(False, False)
         
-        # Status label
+        # Status frame
+        status_frame = tk.Frame(self.attendance_window, padx=10, pady=10)
+        status_frame.pack(fill="x")
+        
         self.status_label = tk.Label(
-            self.attendance_window,
+            status_frame,
             text="Status: Not Connected",
-            font=("Arial", 12)
+            font=("Arial", 10),
+            anchor="w"
         )
-        self.status_label.pack(pady=10)
+        self.status_label.pack(fill="x")
         
-        # Ring notification
+        # Notification frame
+        notification_frame = tk.Frame(self.attendance_window, padx=10, pady=5)
+        notification_frame.pack(fill="x")
+        
         self.ring_label = tk.Label(
-            self.attendance_window,
+            notification_frame,
             text="",
-            font=("Arial", 12),
-            fg="red"
+            font=("Arial", 10, "bold"),
+            fg="red",
+            anchor="w"
         )
-        self.ring_label.pack(pady=10)
+        self.ring_label.pack(fill="x")
         
-        # Start ring check thread
-        threading.Thread(target=self.check_rings, daemon=True).start()
+        # Timer frame
+        timer_frame = tk.Frame(self.attendance_window, padx=20, pady=20)
+        timer_frame.pack(expand=True)
         
-        # Timer UI
         self.timer_label = tk.Label(
-            self.attendance_window,
+            timer_frame,
             text="Click 'Start Attendance' to begin",
-            font=("Arial", 14)
+            font=("Arial", 14),
+            pady=20
         )
-        self.timer_label.pack(pady=20)
+        self.timer_label.pack()
         
         self.start_button = tk.Button(
-            self.attendance_window,
+            timer_frame,
             text="Start Attendance",
             command=self.start_timer,
             font=("Arial", 12),
@@ -192,9 +265,10 @@ class StudentClient:
             padx=20,
             pady=10
         )
-        self.start_button.pack(pady=10)
+        self.start_button.pack(pady=20)
         
-        # Start WiFi check thread
+        # Start threads
+        threading.Thread(target=self.check_rings, daemon=True).start()
         threading.Thread(target=self.check_wifi_status, daemon=True).start()
         
         self.attendance_window.mainloop()
@@ -204,7 +278,7 @@ class StudentClient:
             messagebox.showwarning("No WiFi", "Please connect to WiFi first")
             return
             
-        self.timer = 10  # 10 seconds for demo
+        self.timer = 120  # 10 seconds for demo
         self.timer_started = True
         self.start_button.config(state=tk.DISABLED)
         self.system.send_data("attendance", self.system.username, "present")
@@ -244,9 +318,10 @@ class StudentClient:
                         ring_students = data.get('ring_students', [])
                         if self.system.username in ring_students:
                             self.ring_label.config(
-                                text=f"RANDOM RING ALERT!\nPlease mark attendance now!",
+                                text="RANDOM RING ALERT! Please mark attendance now!",
                                 fg="red"
                             )
+                            self.attendance_window.bell()  # System beep
             except:
                 pass
             threading.Event().wait(10)
@@ -265,11 +340,6 @@ class StudentClient:
                 )
             threading.Event().wait(5)
 
-def hide_console():
-    if os.name == 'nt':
-        ctypes.windll.user32.ShowWindow(ctypes.windll.kernel32.GetConsoleWindow(), 0)
-
 if __name__ == "__main__":
-    hide_console()
     system = AttendanceSystem()
     StudentClient(system)
